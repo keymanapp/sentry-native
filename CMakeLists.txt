@@ -1,4 +1,10 @@
 cmake_minimum_required (VERSION 3.10)
+
+# ===== BEGIN Keyman-specific changes #1 =====
+cmake_policy(SET CMP0091 NEW)
+set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+# ===== END Keyman-specific changes #1 =====
+
 project(Sentry-Native LANGUAGES C CXX ASM)
 
 set(SENTRY_MAIN_PROJECT OFF)
@@ -332,3 +338,12 @@ if(SENTRY_BUILD_EXAMPLES)
 	target_link_libraries(sentry_example sentry)
 	add_test(NAME sentry_example COMMAND sentry_example)
 endif()
+
+# ===== Keyman-specific changes #2 =====
+# CMAKE_SYSTEM_VERSION=6.1 -DCMAKE_VS_WINDOWS_TARGET_PLATFORM_VERSION=8.1
+if(WIN32)
+  if(CMAKE_GENERATOR_PLATFORM STREQUAL "x64")
+    set_property(TARGET sentry PROPERTY OUTPUT_NAME "sentry.x64")
+  endif()
+endif()
+
