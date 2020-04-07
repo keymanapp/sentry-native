@@ -263,7 +263,6 @@ sentry__path_remove_all(const sentry_path_t *path)
     }
     size_t path_len = wcslen(path->path);
     wchar_t *pp = sentry_malloc(sizeof(wchar_t) * (path_len + 2));
-    wcscpy(pp, path->path); // Keyman: see https://github.com/getsentry/sentry-native/issues/220
     pp[path_len] = '\0';
     pp[path_len + 1] = '\0';
     SHFILEOPSTRUCTW shfo = { NULL, FO_DELETE, pp, L"",
