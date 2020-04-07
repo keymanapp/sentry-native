@@ -13,9 +13,12 @@
 #    endif
 #    include <winnt.h>
 
-#if _WIN32_WINNT < 0x0600
+#    if _WIN32_WINNT < 0x0600
 
-#define INIT_ONCE_STATIC_INIT {0}
+#        define INIT_ONCE_STATIC_INIT                                          \
+            {                                                                  \
+                0                                                              \
+            }
 
 typedef union {
     PVOID Ptr;
@@ -26,7 +29,7 @@ typedef struct {
     HANDLE ContinueEvent;
     LONG Waiters;
     LONG Target;
-} CONDITION_VARIABLE_PREVISTA, *PCONDITION_VARIABLE_PREVISTA;      
+} CONDITION_VARIABLE_PREVISTA, *PCONDITION_VARIABLE_PREVISTA;
 
 typedef BOOL(WINAPI *PINIT_ONCE_FN)(
     PINIT_ONCE InitOnce, PVOID Parameter, PVOID *Context);
@@ -38,7 +41,9 @@ InitOnceExecuteOnce(
     for (;;) {
         switch ((ULONG_PTR)InitOnce->Ptr) {
         case 0: // not started
-            if (InterlockedCompareExchangePointer(&InitOnce->Ptr, (PVOID)1, (PVOID)0) != 0) {
+            if (InterlockedCompareExchangePointer(
+                    &InitOnce->Ptr, (PVOID)1, (PVOID)0)
+                != 0) {
                 break;
             }
             if (InitFn(InitOnce, Parameter, Context)) {
@@ -59,14 +64,14 @@ InitOnceExecuteOnce(
 }
 
 inline void
-InitializeConditionVariable_PREVISTA(PCONDITION_VARIABLE_PREVISTA ConditionVariable)
+InitializeConditionVariable_PREVISTA(
+    PCONDITION_VARIABLE_PREVISTA ConditionVariable)
 {
     ConditionVariable->Target = 0;
     ConditionVariable->Waiters = 0;
     ConditionVariable->Semaphore = CreateSemaphoreW(NULL, 0, MAXLONG, NULL);
     ConditionVariable->ContinueEvent = CreateEventW(NULL, FALSE, FALSE, NULL);
 }
-
 
 inline BOOL
 SleepConditionVariableCS_PREVISTA(
@@ -101,13 +106,14 @@ WakeConditionVariable_PREVISTA(PCONDITION_VARIABLE_PREVISTA ConditionVariable)
         return;
     }
 
-    //set target for continue event, alert it on first occurance
+    // set target for continue event, alert it on first occurance
     ConditionVariable->Target = ConditionVariable->Waiters - 1;
 
-    SignalObjectAndWait(ConditionVariable->Semaphore, ConditionVariable->ContinueEvent, INFINITE, FALSE);
+    SignalObjectAndWait(ConditionVariable->Semaphore,
+        ConditionVariable->ContinueEvent, INFINITE, FALSE);
 }
 
-#endif /* _WIN32_WINNT < 0x0600 */
+#    endif /* _WIN32_WINNT < 0x0600 */
 
 struct sentry__winmutex_s {
     INIT_ONCE init_once;
@@ -146,25 +152,23 @@ typedef struct sentry__winmutex_s sentry_mutex_t;
         WaitForSingleObject(ThreadId, INFINITE)
 
 #    if _WIN32_WINNT < 0x0600
-        typedef CONDITION_VARIABLE_PREVISTA sentry_cond_t;
-#       define sentry__cond_init(CondVar)                                     \
+typedef CONDITION_VARIABLE_PREVISTA sentry_cond_t;
+#        define sentry__cond_init(CondVar)                                     \
             InitializeConditionVariable_PREVISTA(CondVar)
-#       define sentry__cond_wake WakeConditionVariable_PREVISTA
-#       define sentry__cond_wait_timeout(CondVar, Lock, Timeout)              \
+#        define sentry__cond_wake WakeConditionVariable_PREVISTA
+#        define sentry__cond_wait_timeout(CondVar, Lock, Timeout)              \
             SleepConditionVariableCS_PREVISTA(                                 \
                 CondVar, &(Lock)->critical_section, Timeout)
 #    else
-        typedef CONDITION_VARIABLE sentry_cond_t;
-#       define sentry__cond_init(CondVar)                                     \
-            InitializeConditionVariable(CondVar)
-#       define sentry__cond_wake WakeConditionVariable
-#       define sentry__cond_wait_timeout(CondVar, Lock, Timeout)              \
+typedef CONDITION_VARIABLE sentry_cond_t;
+#        define sentry__cond_init(CondVar) InitializeConditionVariable(CondVar)
+#        define sentry__cond_wake WakeConditionVariable
+#        define sentry__cond_wait_timeout(CondVar, Lock, Timeout)              \
             SleepConditionVariableCS(                                          \
                 CondVar, &(Lock)->critical_section, Timeout)
 #    endif
 #    define sentry__cond_wait(CondVar, Lock)                                   \
         sentry__cond_wait_timeout(CondVar, Lock, INFINITE)
-
 
 #else
 #    include <errno.h>
@@ -271,14 +275,43 @@ typedef struct sentry_bgworker_s sentry_bgworker_t;
 
 typedef void (*sentry_task_function_t)(void *data);
 
+/**
+ *  Creates a new background worker thread.
+ */
 sentry_bgworker_t *sentry__bgworker_new(void);
+
+/**
+ * Free the background worker.
+ */
 void sentry__bgworker_free(sentry_bgworker_t *bgw);
+
+/**
+ * Start a new background worker thread associated with `bgw`.
+ */
 void sentry__bgworker_start(sentry_bgworker_t *bgw);
+
+/**
+ * This will try to shut down the background worker thread, with a `timeout`.
+ * Returns 0 on success.
+ */
 int sentry__bgworker_shutdown(sentry_bgworker_t *bgw, uint64_t timeout);
+
+/**
+ * This will submit a new task to the background thread.
+ * Returns 0 on success.
+ */
 int sentry__bgworker_submit(sentry_bgworker_t *bgw,
     sentry_task_function_t exec_func, sentry_task_function_t cleanup_func,
     void *data);
-int sentry__bgworker_foreach_matching(sentry_bgworker_t *bgw,
+
+/**
+ * This function will iterate through all the current tasks of the worker
+ * thread, and will call the `callback` function for each task with a matching
+ * `exec_func`. The callback can return `true` to indicate if the current task
+ * should be dropped from the queue.
+ * The function will return the number of dropped tasks.
+ */
+size_t sentry__bgworker_foreach_matching(sentry_bgworker_t *bgw,
     sentry_task_function_t exec_func,
     bool (*callback)(void *task_data, void *data), void *data);
 

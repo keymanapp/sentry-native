@@ -61,7 +61,19 @@ sentry_init(sentry_options_t *options)
     sentry_shutdown();
     sentry__mutex_lock(&g_options_mutex);
     g_options = options;
+
     sentry__path_create_dir_all(options->database_path);
+    sentry_path_t *database_path = options->database_path;
+    options->database_path = sentry__path_absolute(database_path);
+    if (options->database_path) {
+        sentry__path_free(database_path);
+    } else {
+        SENTRY_DEBUG("falling back to non-absolute database path");
+        options->database_path = database_path;
+    }
+    SENTRY_DEBUGF("Using database path \"%" SENTRY_PATH_PRI "\"",
+        options->database_path->path);
+
     load_user_consent(options);
     sentry__mutex_unlock(&g_options_mutex);
 
@@ -98,14 +110,18 @@ sentry_shutdown(void)
     sentry_options_t *options = g_options;
     sentry__mutex_unlock(&g_options_mutex);
 
-    if (options && options->transport && options->transport->shutdown_func) {
-        SENTRY_TRACE("shutting down transport");
-        options->transport->shutdown_func(options->transport);
+    if (options) {
+        if (options->transport && options->transport->shutdown_func) {
+            SENTRY_TRACE("shutting down transport");
+            options->transport->shutdown_func(options->transport);
+        }
+        if (options->backend && options->backend->shutdown_func) {
+            SENTRY_TRACE("shutting down backend");
+            options->backend->shutdown_func(options->backend);
+        }
+        sentry__run_clean(options->run);
     }
-    if (options && options->backend && options->backend->shutdown_func) {
-        SENTRY_TRACE("shutting down backend");
-        options->backend->shutdown_func(options->backend);
-    }
+
     sentry__mutex_lock(&g_options_mutex);
     sentry_options_free(g_options);
     g_options = NULL;
@@ -285,7 +301,7 @@ sentry_options_new(void)
         return NULL;
     }
     memset(opts, 0, sizeof(sentry_options_t));
-    opts->database_path = sentry__path_from_str("./.sentry-native");
+    opts->database_path = sentry__path_from_str(".sentry-native");
     sentry_options_set_dsn(opts, getenv("SENTRY_DSN"));
     opts->release = sentry__string_clone(getenv("SENTRY_RELEASE"));
     opts->environment = sentry__string_clone(getenv("SENTRY_ENVIRONMENT"));

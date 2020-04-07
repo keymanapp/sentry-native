@@ -122,6 +122,7 @@ sentry__breakpad_backend_callback(
     if (transport) {
         sentry__transport_dump_queue(transport);
     }
+    SENTRY_DEBUG("crash has been captured");
 
     sentry__leave_signal_handler();
     return succeeded;
@@ -147,7 +148,8 @@ sentry__breakpad_backend_shutdown(sentry_backend_t *backend)
     delete eh;
 }
 
-static void sentry__breakpad_backend_except(
+static void
+sentry__breakpad_backend_except(
     sentry_backend_t *backend, sentry_ucontext_t *context)
 {
     google_breakpad::ExceptionHandler *eh

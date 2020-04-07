@@ -7,8 +7,11 @@
 #include <dirent.h>
 #include <fcntl.h>
 #include <libgen.h>
+#include <limits.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/errno.h>
+#include <sys/file.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -24,6 +27,80 @@ struct sentry_pathiter_s {
     sentry_path_t *current;
     DIR *dir_handle;
 };
+
+static size_t
+write_loop(int fd, const char *buf, size_t buf_len)
+{
+    while (buf_len > 0) {
+        ssize_t n = write(fd, buf, buf_len);
+        if (n < 0 && (errno == EAGAIN || errno == EINTR)) {
+            continue;
+        } else if (n <= 0) {
+            break;
+        }
+        buf += n;
+        buf_len -= n;
+    }
+
+    return buf_len;
+}
+
+bool
+sentry__filelock_try_lock(sentry_filelock_t *lock)
+{
+    lock->is_locked = false;
+
+    int fd = open(lock->path->path, O_RDONLY | O_CREAT | O_TRUNC,
+        S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH | S_IWOTH);
+    if (fd < 0) {
+        return false;
+    }
+
+    if (flock(fd, LOCK_EX | LOCK_NB) != 0) {
+        close(fd);
+        return false;
+    }
+
+    // There is possible race between the `open` and the `flock` call, in which
+    // other processes could remove the file, and create a new one with the same
+    // name. So we double-check *after* having the lock, that the actual file on
+    // disk is actually the one we just locked. See:
+    // https://stackoverflow.com/questions/17708885/flock-removing-locked-file-without-race-condition
+    struct stat st0;
+    struct stat st1;
+    fstat(fd, &st0);
+    stat(lock->path->path, &st1);
+    if (st0.st_ino != st1.st_ino) {
+        close(fd);
+        return false;
+    }
+
+    lock->fd = fd;
+    lock->is_locked = true;
+    return true;
+}
+
+void
+sentry__filelock_unlock(sentry_filelock_t *lock)
+{
+    if (!lock->is_locked) {
+        return;
+    }
+    sentry__path_remove(lock->path);
+    flock(lock->fd, LOCK_UN);
+    close(lock->fd);
+    lock->is_locked = false;
+}
+
+sentry_path_t *
+sentry__path_absolute(const sentry_path_t *path)
+{
+    char full[PATH_MAX];
+    if (!realpath(path->path, full)) {
+        return NULL;
+    }
+    return sentry__path_from_str(full);
+}
 
 sentry_path_t *
 sentry__path_current_exe(void)
@@ -182,6 +259,17 @@ sentry__path_clone(const sentry_path_t *path)
     return rv;
 }
 
+#define EINTR_RETRY(X, Y)                                                      \
+    do {                                                                       \
+        int _tmp;                                                              \
+        do {                                                                   \
+            _tmp = (X);                                                        \
+        } while (_tmp == -1 && errno == EINTR);                                \
+        if (Y != 0) {                                                          \
+            *(int *)Y = _tmp;                                                  \
+        }                                                                      \
+    } while (false)
+
 int
 sentry__path_remove(const sentry_path_t *path)
 {
@@ -201,20 +289,6 @@ sentry__path_remove(const sentry_path_t *path)
         return 0;
     }
     return 1;
-}
-
-int
-sentry__path_remove_all(const sentry_path_t *path)
-{
-    if (sentry__path_is_dir(path)) {
-        sentry_pathiter_t *piter = sentry__path_iter_directory(path);
-        const sentry_path_t *p;
-        while ((p = sentry__pathiter_next(piter)) != NULL) {
-            sentry__path_remove_all(p);
-        }
-        sentry__pathiter_free(piter);
-    }
-    return sentry__path_remove(path);
 }
 
 int
@@ -343,12 +417,11 @@ sentry__path_read_to_buffer(const sentry_path_t *path, size_t *size_out)
 
     size_t remaining = len;
     size_t offset = 0;
-    while (true) {
+    while (remaining > 0) {
         ssize_t n = read(fd, rv + offset, remaining);
-        if (n <= 0) {
-            if (errno == EAGAIN || errno == EINTR) {
-                continue;
-            }
+        if (n < 0 && (errno == EAGAIN || errno == EINTR)) {
+            continue;
+        } else if (n <= 0) {
             break;
         }
         offset += n;
@@ -375,23 +448,7 @@ write_buffer_with_flags(
         return 1;
     }
 
-    size_t offset = 0;
-    size_t remaining = buf_len;
-
-    while (true) {
-        if (remaining == 0) {
-            break;
-        }
-        ssize_t n = write(fd, buf + offset, remaining);
-        if (n <= 0) {
-            if (errno == EAGAIN || errno == EINTR) {
-                continue;
-            }
-            break;
-        }
-        offset += n;
-        remaining -= n;
-    }
+    size_t remaining = write_loop(fd, buf, buf_len);
 
     close(fd);
     return remaining == 0 ? 0 : 1;
