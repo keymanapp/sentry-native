@@ -63,33 +63,49 @@ if %BUILD32% == 1 (
     rd /s/q build_32
     if errorlevel 1 (
       echo ERROR: Failed to delete build_32 prior to configure
-      goto :eof
+      goto fail
     )
   )
-  cmake -B build_32 -DSENTRY_BACKEND=crashpad -DCMAKE_SYSTEM_VERSION=6.1 -DCMAKE_VS_WINDOWS_TARGET_PLATFORM_VERSION=8.1
+  cmake -B build_32 -DSENTRY_BACKEND=crashpad
+  rem -DCMAKE_SYSTEM_VERSION=6.1 -DCMAKE_VS_WINDOWS_TARGET_PLATFORM_VERSION=8.1
+  if errorlevel 1 goto fail
 )
 if %BUILD64% == 1 (
   if exist build_64 (
     rd /s/q build_64
     if errorlevel 1 (
       echo ERROR: Failed to delete build_64 prior to configure
-      goto :eof
+      goto fail
     )
   )
-  cmake -B build_64 -DSENTRY_BACKEND=crashpad -DCMAKE_SYSTEM_VERSION=6.1 -DCMAKE_VS_WINDOWS_TARGET_PLATFORM_VERSION=8.1 -A x64
+  cmake -B build_64 -DSENTRY_BACKEND=crashpad -A x64
+  rem -DCMAKE_SYSTEM_VERSION=6.1 -DCMAKE_VS_WINDOWS_TARGET_PLATFORM_VERSION=8.1
+  if errorlevel 1 goto fail
 )
 goto next
 
 
 :build
-if %BUILD32% == 1 cmake --build build_32 --parallel --config %CONFIG%
-if %BUILD64% == 1 cmake --build build_64 --parallel --config %CONFIG%
+if %BUILD32% == 1 (
+  cmake --build build_32 --parallel --config %CONFIG%
+  if errorlevel 1 goto fail
+)
+if %BUILD64% == 1 (
+  cmake --build build_64 --parallel --config %CONFIG%
+  if errorlevel 1 goto fail
+)
 goto next
 
 
 :install
-if %BUILD32% == 1 cmake --install build_32 --prefix install_32 --config %CONFIG%
-if %BUILD64% == 1 cmake --install build_64 --prefix install_64 --config %CONFIG%
+if %BUILD32% == 1 (
+  cmake --install build_32 --prefix install_32 --config %CONFIG%
+  if errorlevel 1 goto fail
+)
+if %BUILD64% == 1 (
+  cmake --install build_64 --prefix install_64 --config %CONFIG%
+  if errorlevel 1 goto fail
+)
 goto next
 
 
@@ -97,20 +113,26 @@ goto next
 
 if "%KEYMAN_ROOT%" == "" (
   echo ERROR: Could not find KEYMAN_ROOT environment variable specifying repository root
-  goto :eof
+  goto fail
 )
 
 copy install_32\include\sentry.h %KEYMAN_ROOT%\windows\src\ext\sentry\sentry.h
+if errorlevel 1 goto fail
 
 if %BUILD32% == 1 (
   copy install_32\bin\sentry.dll %KEYMAN_ROOT%\windows\src\ext\sentry\sentry.dll
+  if errorlevel 1 goto fail
   copy install_32\lib\sentry.lib %KEYMAN_ROOT%\windows\src\ext\sentry\sentry.lib
+  if errorlevel 1 goto fail
   copy install_32\bin\crashpad_handler.exe %KEYMAN_ROOT%\windows\src\ext\sentry\crashpad_handler.exe
+  if errorlevel 1 goto fail
 )
 
 if %BUILD64% == 1 (
   copy install_64\bin\sentry.x64.dll %KEYMAN_ROOT%\windows\src\ext\sentry\sentry.x64.dll
+  if errorlevel 1 goto fail
   copy install_64\lib\sentry.x64.lib %KEYMAN_ROOT%\windows\src\ext\sentry\sentry.x64.lib
+  if errorlevel 1 goto fail
 )
 
 goto next
@@ -128,3 +150,7 @@ goto :eof
 :error
 echo Invalid parameters
 goto help
+
+:fail
+echo FATAL: Build failed.
+exit /b 1

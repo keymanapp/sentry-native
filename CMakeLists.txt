@@ -3,6 +3,7 @@ cmake_minimum_required (VERSION 3.10)
 # ===== BEGIN Keyman-specific changes #1 =====
 cmake_policy(SET CMP0091 NEW)
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+add_compile_options(/wd4091) # This is for dbghelp.h when targeting 8.1
 # ===== END Keyman-specific changes #1 =====
 
 project(Sentry-Native LANGUAGES C CXX ASM)
